@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Petit Bac</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://unpkg.com/vue@3.4.31/dist/vue.global.prod.js"></script>
+    <style>
+      :root {
+        --bg: #0b0b0e;
+        --card: #141419;
+        --muted: #8a8aa0;
+        --accent: #e63946;
+        --ok: #22c55e;
+        --border: #242432;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: Inter, system-ui, Segoe UI, Roboto, Arial;
+        background: var(--bg);
+        color: #fff;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 16px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .review-nav {
+        display: flex;
+        gap: 8px;
+        flex-direction: row;
+        justify-content: flex-start;
+        align-items: center;
+      }
+      input,
+      textarea,
+      select,
+      button {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: #0f0f14;
+        color: #fff;
+      }
+      button {
+        background: #222232;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: #000;
+      }
+      button.ghost {
+        background: transparent;
+        border-color: var(--border);
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .grid {
+        display: grid;
+        gap: 12px;
+      }
+      .grid.cols-2 {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .badge {
+        background: #2a2a35;
+        padding: 4px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+      }
+      .list {
+        display: grid;
+        gap: 8px;
+      }
+      .k {
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        font-size: 13px;
+        color: #bdbde2;
+        text-transform: uppercase;
+      }
+      .player {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: #101018;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+      }
+      .pill {
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        font-size: 12px;
+      }
+      .table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0 8px;
+      }
+      .th,
+      .td {
+        padding: 10px 12px;
+        background: #111119;
+        border: 1px solid var(--border);
+      }
+      .th {
+        font-weight: 600;
+        color: #c9c9f1;
+      }
+      .td {
+        color: #eaeafa;
+      }
+      .check {
+        width: 22px;
+        height: 22px;
+        display: inline-grid;
+        place-items: center;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        cursor: pointer;
+      }
+      .check.valid {
+        background: var(--ok);
+        border-color: var(--ok);
+      }
+      .center {
+        text-align: center;
+      }
+      .td {
+        vertical-align: top;
+      }
+
+      /* Review style */
+      .answerRow {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: #111119;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px 12px;
+      }
+      .playerName {
+        font-weight: 800;
+        opacity: 0.9;
+        min-width: 140px;
+      }
+      .answerText {
+        flex: 1;
+        white-space: normal;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+      }
+      .tick {
+        width: 26px;
+        height: 26px;
+        display: grid;
+        place-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        cursor: pointer;
+      }
+      .tick.valid {
+        background: var(--ok);
+        border-color: var(--ok);
+        color: #000;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app" class="wrap">
+      <h1 style="font-weight: 800; letter-spacing: 0.02em">Le petit Bac</h1>
+
+      <div class="card grid" v-if="view==='home'">
+        <div class="grid cols-2">
+          <div>
+            <h3>Créer une partie</h3>
+            <div class="grid">
+              <input v-model="hostName" placeholder="Votre nom (MC)" />
+              <textarea
+                v-model="categoriesText"
+                rows="5"
+                placeholder="Catégories (une par ligne)"
+              ></textarea>
+              <button class="primary" @click="createGame">Créer</button>
+            </div>
+          </div>
+          <div>
+            <h3>Rejoindre</h3>
+            <div class="grid">
+              <input v-model="joinName" placeholder="Votre nom" />
+              <input
+                v-model="joinCode"
+                placeholder="Code de partie (ex: P7K3Q)"
+              />
+              <button class="primary" @click="joinGame">Rejoindre</button>
+            </div>
+          </div>
+        </div>
+        <p class="muted">
+          Partagez le code de partie avec vos amis. Interface mobile compatible.
+        </p>
+      </div>
+
+      <!-- LOBBY -->
+      <div class="card grid" v-if="view==='lobby'">
+        <div class="row" style="justify-content: space-between">
+          <div>
+            <span class="k">Code</span>
+            <div style="font-size: 28px; font-weight: 800">{{ game.code }}</div>
+          </div>
+          <div>
+            <span class="k">Statut</span>
+            <div class="badge">{{ game.status }}</div>
+          </div>
+        </div>
+        <div>
+          <span class="k">Joueurs</span>
+          <div class="list">
+            <div class="player" v-for="p in game.players" :key="p.id">
+              <div>{{ p.name }}</div>
+              <div class="pill">Score: {{ p.score }}</div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="iAmHost" class="grid cols-2">
+          <div class="grid">
+            <label class="k">Lettre (laisser vide pour aléatoire)</label
+            ><input v-model="customLetter" placeholder="Ex: P" maxlength="1" />
+          </div>
+          <div class="grid">
+            <label class="k">Catégories</label
+            ><textarea v-model="categoriesText" rows="4"></textarea>
+          </div>
+        </div>
+
+        <div class="row">
+          <button v-if="iAmHost" class="primary" @click="startRound">
+            Lancer le round
+          </button>
+          <button v-if="iAmHost" class="ghost" @click="forceReview">
+            Forcer review
+          </button>
+        </div>
+      </div>
+
+      <!-- JEU (joueurs) -->
+      <div class="card grid" v-if="view==='playing'">
+        <div
+          class="row"
+          style="justify-content: space-between; align-items: baseline"
+        >
+          <h2>
+            Lettre: <span style="font-size: 36px">{{ playing.letter }}</span>
+          </h2>
+          <div class="badge">Round {{ round }}</div>
+        </div>
+
+        <div class="grid" v-for="cat in playing.categories" :key="cat">
+          <label class="k">{{ cat }}</label>
+          <input
+            :placeholder="'Réponse en '+playing.letter+'…'"
+            v-model="answers[cat]"
+          />
+        </div>
+
+        <button class="primary" @click="submitAnswers" :disabled="submitted">
+          {{ submitted ? 'Envoyé ✓' : 'Envoyer' }}
+        </button>
+        <div class="muted" v-if="progress">
+          Soumissions: {{ progress.submitted }}/{{ progress.total }}
+        </div>
+      </div>
+
+      <!-- REVIEW (MC) -->
+      <div class="card grid" v-if="view==='review'">
+        <div
+          class="row"
+          style="justify-content: space-between; align-items: baseline"
+        >
+          <h2>Thème : {{ review.categories[reviewIndex] }}</h2>
+          <span class="badge"
+            >{{ reviewIndex+1 }} / {{ review.categories.length }}</span
+          >
+        </div>
+
+        <div class="list">
+          <div class="answerRow" v-for="p in review.players" :key="p.id">
+            <div class="playerName">{{ p.name }}</div>
+            <div class="row" style="gap: 8px; flex: 1; align-items: flex-start">
+              <div
+                class="tick"
+                :class="{ valid: p.validations[review.categories[reviewIndex]] }"
+                v-if="iAmHost"
+                role="button"
+                tabindex="0"
+                :aria-pressed="!!p.validations[review.categories[reviewIndex]]"
+                @click="toggleValidation(p.id, review.categories[reviewIndex])"
+                @keydown.enter.prevent="toggleValidation(p.id, review.categories[reviewIndex])"
+                @keydown.space.prevent="toggleValidation(p.id, review.categories[reviewIndex])"
+                title="Valider / invalider"
+              >
+                ✓
+              </div>
+              <div class="badge" v-else>
+                {{ p.validations[review.categories[reviewIndex]] ? '✓' : '—' }}
+              </div>
+              <div class="answerText">
+                {{ p.answers[review.categories[reviewIndex]] || '—' }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row" style="justify-content: space-between">
+          <button v-if="iAmHost" class="primary" @click="endRound">
+            Clore le round & calculer
+          </button>
+          <div class="review-nav">
+            <template v-if="iAmHost">
+              <button class="ghost" @click="prevCat">◀ Thème</button>
+              <button class="ghost" @click="nextCat">Thème ▶</button>
+            </template>
+            <button class="ghost" @click="goLobby">Retour lobby</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- FIN DE ROUND / LEADERBOARD -->
+      <div class="card grid" v-if="view==='ended'">
+        <h2>Scores</h2>
+        <div class="list">
+          <div class="player" v-for="p in leaderboard" :key="p.id">
+            <div>{{ p.name }}</div>
+            <div style="font-weight: 700">{{ p.score }}</div>
+          </div>
+        </div>
+        <div class="row">
+          <button class="primary" v-if="iAmHost" @click="goLobby">
+            Nouveau round
+          </button>
+          <button class="ghost" @click="goLobby">Lobby</button>
+        </div>
+      </div>
+
+      <p class="muted center" style="margin-top: 24px">
+        Astuce: le MC clique sur une case pour valider ✓ (1 point).
+      </p>
+    </div>
+
+    <script>
+      const { createApp, reactive } = Vue;
+      const socket = io();
+
+      createApp({
+        data() {
+          return {
+            view: "home",
+            hostName: "",
+            categoriesText:
+              "Fruit\nObjet très utile sur une île déserte\nHobby\nSport un peu niche\nArme\nSite internet",
+            joinName: "",
+            joinCode: "",
+            code: null,
+            iAmHost: false,
+            game: { players: [], categories: [], status: "lobby", code: null },
+            customLetter: "",
+            round: 0,
+            playing: { letter: "", categories: [] },
+            answers: reactive({}),
+            submitted: false,
+            progress: null,
+            review: { players: [], categories: [], letter: "" },
+            reviewIndex: 0,
+            leaderboard: [],
+          };
+        },
+        methods: {
+          createGame() {
+            const categories = this.categoriesText
+              .split(/\n|,/)
+              .map((s) => s.trim())
+              .filter(Boolean);
+            socket.emit("createGame", {
+              name: this.hostName || "Maître",
+              categories,
+            });
+          },
+          joinGame() {
+            socket.emit("joinGame", {
+              code: (this.joinCode || "").trim().toUpperCase(),
+              name: this.joinName || "Joueur",
+            });
+          },
+          startRound() {
+            if (!this.code) return;
+            const letter =
+              (this.customLetter || "").toUpperCase().slice(0, 1) || null;
+            const cats = this.categoriesText
+              .split(/\n|,/)
+              .map((s) => s.trim())
+              .filter(Boolean);
+            this.game.categories = cats;
+            socket.emit("startRound", { code: this.code, letter });
+          },
+          submitAnswers() {
+            this.submitted = true;
+            socket.emit("submitAnswers", {
+              code: this.code,
+              answers: this.answers,
+            });
+          },
+          forceReview() {
+            socket.emit("forceReview", { code: this.code });
+          },
+          toggleValidation(playerId, category) {
+            socket.emit("toggleValidation", {
+              code: this.code,
+              playerId,
+              category,
+            });
+          },
+          endRound() {
+            socket.emit("endRound", { code: this.code });
+          },
+          prevCat() {
+            if (!this.review.categories.length) return;
+            const n =
+              (this.reviewIndex - 1 + this.review.categories.length) %
+              this.review.categories.length;
+            this.reviewIndex = n;
+            if (this.iAmHost)
+              socket.emit("setReviewIndex", { code: this.code, index: n });
+          },
+          nextCat() {
+            if (!this.review.categories.length) return;
+            const n = (this.reviewIndex + 1) % this.review.categories.length;
+            this.reviewIndex = n;
+            if (this.iAmHost)
+              socket.emit("setReviewIndex", { code: this.code, index: n });
+          },
+          goLobby() {
+            this.view = "lobby";
+          },
+        },
+        mounted() {
+          socket.on("created", ({ code, youAreHost }) => {
+            this.code = code;
+            this.iAmHost = youAreHost;
+            this.view = "lobby";
+          });
+          socket.on("joined", ({ code, youAreHost }) => {
+            this.code = code;
+            this.iAmHost = youAreHost;
+            this.view = "lobby";
+          });
+          socket.on("lobbyUpdate", (g) => {
+            this.game = g;
+            this.code = g.code;
+            this.round = g.round;
+            this.categoriesText = g.categories.join("\n");
+          });
+          socket.on("roundStarted", (payload) => {
+            this.view = "playing";
+            this.playing = payload;
+            this.round = payload.round;
+            this.answers = reactive({});
+            this.submitted = false;
+            this.progress = null;
+          });
+          socket.on("progress", (p) => {
+            this.progress = p;
+          });
+
+          // ⚠️ ne PAS réinitialiser reviewIndex ici, le MC pilote via reviewNavigate
+          socket.on("reviewPhase", (payload) => {
+            this.view = "review";
+            this.review = payload;
+            // => utilise l'index envoyé par le serveur
+            if (typeof payload.reviewIndex === "number") {
+              this.reviewIndex = payload.reviewIndex;
+            }
+          });
+          // ➜ synchro du thème piloté par le MC
+          socket.on("reviewNavigate", ({ index }) => {
+            this.reviewIndex = index;
+          });
+
+          socket.on("validationUpdated", ({ playerId, category, valid }) => {
+            const p = this.review.players.find((x) => x.id === playerId);
+            if (p) p.validations[category] = valid;
+          });
+          socket.on("roundEnded", ({ leaderboard }) => {
+            this.view = "ended";
+            this.leaderboard = leaderboard;
+          });
+          socket.on("errorMsg", (m) => alert(m));
+        },
+      }).mount("#app");
+    </script>
+  </body>
+</html>
