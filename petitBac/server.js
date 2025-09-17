@@ -35,7 +35,7 @@ app.get("/health", (_, res) => res.json({ ok: true }));
 // === Socket.IO ===
 io.on("connection", (socket) => {
   // Création de partie par le MC
-  socket.on("createGame", ({ name, categories }) => {
+    socket.on("createGame", ({ name, categories, hostPlays }) => {
     const code = nanoid();
     const game = {
       code,
@@ -56,6 +56,8 @@ io.on("connection", (socket) => {
     };
 
     socket.join(code);
+      // Seulement si le MC veut jouer, on l'ajoute comme joueur
+      if (hostPlays !== false) {
     game.players.set(socket.id, {
       id: socket.id,
       name: name?.trim() || "Maître",
@@ -66,6 +68,7 @@ io.on("connection", (socket) => {
       validations: {},
       score: 0,
     });
+      }
 
     games.set(code, game);
     io.to(code).emit("lobbyUpdate", publicGame(game));
@@ -228,6 +231,7 @@ function publicGame(game) {
     round: game.round,
     letter: game.letter,
     categories: game.categories,
+    hostPlays: game.players.has(game.hostId),
     players: [...game.players.values()].map((p) => ({
       id: p.id,
       name: p.name,

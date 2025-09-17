@@ -195,6 +195,11 @@
         color: #000;
         font-weight: 700;
       }
+      .cb {
+        width: auto;
+        height: 18px;
+        accent-color: var(--accent);
+      }
     </style>
   </head>
   <body>
@@ -212,6 +217,10 @@
                 rows="5"
                 placeholder="Catégories (une par ligne)"
               ></textarea>
+              <label class="row" style="justify-content:flex-start; gap:8px">
+                <input type="checkbox" v-model="hostPlays" class="cb" />
+                <span>Je participe en tant que joueur</span>
+              </label>
               <button class="primary" @click="createGame">Créer</button>
             </div>
           </div>
@@ -286,21 +295,32 @@
           </h2>
           <div class="badge">Round {{ round }}</div>
         </div>
-
-        <div class="grid" v-for="cat in playing.categories" :key="cat">
-          <label class="k">{{ cat }}</label>
-          <input
-            :placeholder="'Réponse en '+playing.letter+'…'"
-            v-model="answers[cat]"
-          />
+        <div v-if="iAmHost && !game.hostPlays" class="badge">
+          Mode MC — vous ne participez pas à ce round
         </div>
+        <!-- Si je NE suis PAS MC OU si le MC joue => formulaire normal -->
+        <template v-if="!iAmHost || game.hostPlays">
+          <div class="grid" v-for="cat in playing.categories" :key="cat">
+            <label class="k">{{ cat }}</label>
+            <input :placeholder="'Réponse en '+playing.letter+'…'" v-model="answers[cat]" />
+          </div>
 
-        <button class="primary" @click="submitAnswers" :disabled="submitted">
-          {{ submitted ? 'Envoyé ✓' : 'Envoyer' }}
-        </button>
-        <div class="muted" v-if="progress">
-          Soumissions: {{ progress.submitted }}/{{ progress.total }}
-        </div>
+          <button class="primary" @click="submitAnswers" :disabled="submitted">
+            {{ submitted ? 'Envoyé ✓' : 'Envoyer' }}
+          </button>
+          <div class="muted" v-if="progress">
+            Soumissions: {{ progress.submitted }}/{{ progress.total }}
+          </div>
+        </template>
+        <!-- Si je suis MC et que je ne joue PAS => affichage lecture seule -->
+        <template v-else>
+          <div class="list">
+            <div class="answerRow" v-for="cat in playing.categories" :key="cat">
+              <div class="playerName">{{ cat }}</div>
+              <div class="answerText muted">Le MC ne participe pas à ce round</div>
+            </div>
+          </div>
+        </template>
       </div>
 
       <!-- REVIEW (MC) -->
@@ -404,6 +424,7 @@
             review: { players: [], categories: [], letter: "" },
             reviewIndex: 0,
             leaderboard: [],
+            hostPlays: true,
           };
         },
         methods: {
@@ -415,6 +436,7 @@
             socket.emit("createGame", {
               name: this.hostName || "Maître",
               categories,
+              hostPlays: this.hostPlays
             });
           },
           joinGame() {
