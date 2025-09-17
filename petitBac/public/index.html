@@ -454,7 +454,7 @@
               .map((s) => s.trim())
               .filter(Boolean);
             this.game.categories = cats;
-            socket.emit("startRound", { code: this.code, letter });
+            socket.emit("startRound", { code: this.code, letter, categories: cats });
           },
           submitAnswers() {
             this.submitted = true;

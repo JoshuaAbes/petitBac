@@ -98,29 +98,34 @@ io.on("connection", (socket) => {
   });
 
   // Lancer un round par le MC
-  socket.on("startRound", ({ code, letter }) => {
+  socket.on("startRound", ({ code, letter, categories }) => {
     const game = games.get(code);
     if (!game) return;
     if (socket.id !== game.hostId) return;
-
-    game.status = "playing";
-    game.round += 1;
-    game.letter = letter || randomLetter();
-
-    // reset des états joueurs
-    for (const p of game.players.values()) {
-      p.submitted = false;
-      p.answers = {};
-      p.validations = {};
-    }
-    game.reviewIndex = 0; // FIX: on repartira du 1er thème à la prochaine review
-
-    io.to(code).emit("roundStarted", {
-      round: game.round,
-      letter: game.letter,
-      categories: game.categories,
-      timeLimitSec: 0,
-    });
+        
+        // Met à jour les catégories si envoyées
+        if (Array.isArray(categories) && categories.length) {
+          game.categories = categories;
+        }
+        
+        game.status = "playing";
+        game.round += 1;
+        game.letter = letter || randomLetter();
+        
+        // reset des états joueurs
+        for (const p of game.players.values()) {
+          p.submitted = false;
+          p.answers = {};
+          p.validations = {};
+        }
+        game.reviewIndex = 0; // FIX: on repartira du 1er thème à la prochaine review
+        
+        io.to(code).emit("roundStarted", {
+          round: game.round,
+          letter: game.letter,
+          categories: game.categories,
+          timeLimitSec: 0,
+        });
   });
 
   // Soumission des réponses par un joueur
