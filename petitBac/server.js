@@ -35,7 +35,7 @@ app.get("/health", (_, res) => res.json({ ok: true }));
 // === Socket.IO ===
 io.on("connection", (socket) => {
   // Création de partie par le MC
-    socket.on("createGame", ({ name, categories, hostPlays }) => {
+  socket.on("createGame", ({ name, categories, hostPlays, endMode }) => {
     const code = nanoid();
     const game = {
       code,
@@ -53,6 +53,7 @@ io.on("connection", (socket) => {
         "Site internet",
       ],
       reviewIndex: 0,
+      endMode: endMode === 'first' ? 'first' : 'all', // défaut: all
     };
 
     socket.join(code);
@@ -109,22 +110,19 @@ io.on("connection", (socket) => {
         }
         
         game.status = "playing";
-        game.round += 1;
+        game.round++;
         game.letter = letter || randomLetter();
-        
-        // reset des états joueurs
+        if (categories && categories.length) game.categories = categories;
+        // Réinitialise les réponses et soumissions
         for (const p of game.players.values()) {
           p.submitted = false;
           p.answers = {};
-          p.validations = {};
         }
-        game.reviewIndex = 0; // FIX: on repartira du 1er thème à la prochaine review
-        
         io.to(code).emit("roundStarted", {
           round: game.round,
           letter: game.letter,
           categories: game.categories,
-          timeLimitSec: 0,
+          endMode: game.endMode,
         });
   });
 
@@ -143,12 +141,21 @@ io.on("connection", (socket) => {
       total: game.players.size,
     });
 
-    // Si tout le monde a soumis, passage à la review automatiquement
-    if ([...game.players.values()].every((p) => p.submitted)) {
+    // Fin de manche selon le mode choisi
+    if (game.endMode === 'first') {
+      // Dès qu'un joueur soumet, on passe en review
       game.status = "review";
-      game.reviewIndex = 0; // FIX: on force la review à démarrer sur le 1er thème
+      game.reviewIndex = 0;
       io.to(code).emit("reviewPhase", reviewPayload(game));
-      io.to(code).emit("reviewNavigate", { index: game.reviewIndex }); // diffusion
+      io.to(code).emit("reviewNavigate", { index: game.reviewIndex });
+    } else {
+      // Mode classique: tous doivent soumettre
+      if ([...game.players.values()].every((p) => p.submitted)) {
+        game.status = "review";
+        game.reviewIndex = 0;
+        io.to(code).emit("reviewPhase", reviewPayload(game));
+        io.to(code).emit("reviewNavigate", { index: game.reviewIndex });
+      }
     }
   });
 

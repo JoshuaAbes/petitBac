@@ -221,6 +221,13 @@
                 <input type="checkbox" v-model="hostPlays" class="cb" />
                 <span>Je participe en tant que joueur</span>
               </label>
+              <label class="row" style="justify-content:flex-start; gap:8px">
+                <span>Fin de manche :</span>
+                <select v-model="endMode" style="width:auto; min-width:180px;">
+                  <option value="all">Tous doivent valider</option>
+                  <option value="first">Premier qui valide stoppe</option>
+                </select>
+              </label>
               <button class="primary" @click="createGame">Créer</button>
             </div>
           </div>
@@ -294,6 +301,9 @@
             Lettre: <span style="font-size: 36px">{{ playing.letter }}</span>
           </h2>
           <div class="badge">Round {{ round }}</div>
+        </div>
+        <div class="end-mode-info" style="margin-bottom:8px;">
+          <span>Mode de fin de manche : <strong>{{ (playing.endMode || game.endMode || endMode) === 'first' ? 'Premier qui valide stoppe' : 'Tous doivent valider' }}</strong></span>
         </div>
         <div v-if="iAmHost && !game.hostPlays" class="badge">
           Mode MC — vous ne participez pas à ce round
@@ -425,6 +435,7 @@
             reviewIndex: 0,
             leaderboard: [],
             hostPlays: true,
+            endMode: 'all', // 'all' = tous doivent valider, 'first' = premier stoppe
           };
         },
         methods: {
@@ -436,7 +447,8 @@
             socket.emit("createGame", {
               name: this.hostName || "Maître",
               categories,
-              hostPlays: this.hostPlays
+              hostPlays: this.hostPlays,
+              endMode: this.endMode
             });
           },
           joinGame() {
@@ -517,6 +529,7 @@
             this.view = "playing";
             this.playing = payload;
             this.round = payload.round;
+            if (payload.endMode) this.endMode = payload.endMode;
             this.answers = reactive({});
             this.submitted = false;
             this.progress = null;
