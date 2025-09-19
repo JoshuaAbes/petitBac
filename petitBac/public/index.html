@@ -216,7 +216,12 @@
                 v-model="categoriesText"
                 rows="5"
                 placeholder="Catégories (une par ligne)"
+                :disabled="useRandomCats"
               ></textarea>
+              <label class="row" style="justify-content:flex-start; gap:8px">
+                <input type="checkbox" v-model="useRandomCats" class="cb" />
+                <span>Utiliser 6 catégories aléatoires (depuis le fichier JSON)</span>
+              </label>
               <label class="row" style="justify-content:flex-start; gap:8px">
                 <input type="checkbox" v-model="hostPlays" class="cb" />
                 <span>Je participe en tant que joueur</span>
@@ -438,6 +443,7 @@
             leaderboard: [],
             hostPlays: true,
             endMode: 'all', // 'all' = tous doivent valider, 'first' = premier stoppe
+            useRandomCats: false,
           };
         },
         methods: {
@@ -450,7 +456,8 @@
               name: this.hostName || "Maître",
               categories,
               hostPlays: this.hostPlays,
-              endMode: this.endMode
+              endMode: this.endMode,
+              randomThemes: this.useRandomCats
             });
           },
           joinGame() {
@@ -467,7 +474,7 @@
               .split(/\n|,/)
               .map((s) => s.trim())
               .filter(Boolean);
-            this.game.categories = cats;
+            // Le serveur décidera quoi faire selon randomThemes stocké côté partie
             socket.emit("startRound", { code: this.code, letter, categories: cats });
           },
           submitAnswers() {
@@ -529,6 +536,7 @@
             this.code = g.code;
             this.round = g.round;
             this.categoriesText = g.categories.join("\n");
+            this.useRandomCats = !!g.randomThemes; // refléter l’état côté MC
           });
           socket.on("roundStarted", (payload) => {
             this.view = "playing";

@@ -9,6 +9,48 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static("public"));
 
+const fs = require("fs");
+const path = require("path");
+
+const DEFAULT_CATEGORIES = [
+  "Fruit",
+  "Objet très utile sur une île déserte",
+  "Hobby",
+  "Sport un peu niche",
+  "Arme",
+  "Site internet",
+];
+
+function loadCategoriesFile() {
+  const candidates = [
+    path.join(__dirname, "categories.json"),
+    path.join(__dirname, "database", "seeders", "categories.json"),
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, "utf8");
+        const data = JSON.parse(raw);
+        if (Array.isArray(data)) return data;
+        if (data && Array.isArray(data.categories)) return data.categories;
+      }
+    } catch (e) {
+      console.warn("[categories] lecture échouée:", e.message);
+    }
+  }
+  console.warn("[categories] fallback valeurs par défaut");
+  return DEFAULT_CATEGORIES;
+}
+
+function pickRandom(arr, n) {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, n);
+}
+
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
@@ -16,7 +58,9 @@ const io = new Server(server, { cors: { origin: "*" } });
 const nanoid = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 5); // ex: P7K3Q
 const randomLetter = () => {
   const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const pool = letters.split("").filter((l) => !["W", "X", "Y", "Z"].includes(l));
+  const pool = letters
+    .split("")
+    .filter((l) => !["W", "X", "Y", "Z"].includes(l));
   return pool[Math.floor(Math.random() * pool.length)];
 };
 
@@ -36,51 +80,65 @@ app.get("/health", (_, res) => res.json({ ok: true }));
 io.on("connection", (socket) => {
   // Utilitaire pour ne compter que les joueurs qui jouent (hors MC si non joueur)
   function playingPlayers(game) {
-    return [...game.players.values()].filter((p) => !(p.id === game.hostId && !game.hostPlays));
+    return [...game.players.values()].filter(
+      (p) => !(p.id === game.hostId && !game.hostPlays)
+    );
   }
 
   // Création de partie par le MC
-  socket.on("createGame", ({ name, categories, hostPlays = true, endMode = 'all' }) => {
-    const code = nanoid();
-    const game = {
-      code,
-      hostId: socket.id,
-      players: new Map(),
-      status: "lobby",
-      round: 0,
-      letter: null,
-      categories: categories && categories.length ? categories : [
-        "Fruit","Objet très utile sur une île déserte","Hobby","Sport un peu niche","Arme","Site internet"
-      ],
-      reviewIndex: 0,
-      hostPlays: !!hostPlays,
-      endMode: endMode === 'first' ? 'first' : 'all',
-    };
+  socket.on(
+    "createGame",
+    ({
+      name,
+      categories,
+      hostPlays = true,
+      endMode = "all",
+      randomThemes = false,
+    }) => {
+      const code = nanoid();
+      const game = {
+        code,
+        hostId: socket.id,
+        players: new Map(),
+        status: "lobby",
+        round: 0,
+        letter: null,
+        categories:
+          Array.isArray(categories) && categories.length
+            ? categories
+            : DEFAULT_CATEGORIES,
+        reviewIndex: 0,
+        hostPlays: !!hostPlays,
+        endMode: endMode === "first" ? "first" : "all",
+        randomThemes: !!randomThemes,
+      };
 
-    socket.join(code);
-    if (hostPlays !== false) {
-      game.players.set(socket.id, {
-        id: socket.id,
-        name: name?.trim() || "Maître",
-        isHost: true,
-        joinedAt: Date.now(),
-        submitted: false,
-        answers: {},
-        validations: {},
-        score: 0,
-      });
+      socket.join(code);
+      if (hostPlays !== false) {
+        game.players.set(socket.id, {
+          id: socket.id,
+          name: name?.trim() || "Maître",
+          isHost: true,
+          joinedAt: Date.now(),
+          submitted: false,
+          answers: {},
+          validations: {},
+          score: 0,
+        });
+      }
+
+      games.set(code, game);
+      io.to(code).emit("lobbyUpdate", publicGame(game));
+      socket.emit("created", { code, youAreHost: true });
     }
-
-    games.set(code, game);
-    io.to(code).emit("lobbyUpdate", publicGame(game));
-    socket.emit("created", { code, youAreHost: true });
-  });
+  );
 
   // Rejoindre une partie
   socket.on("joinGame", ({ code, name }) => {
     const game = games.get((code || "").toUpperCase());
     if (!game) return socket.emit("errorMsg", "Code de partie invalide.");
-    if (game.status !== "lobby") return socket.emit("errorMsg", "La partie a déjà démarré.");
+    if (game.status !== "lobby")
+      return socket.emit("errorMsg", "La partie a déjà démarré.");
 
     socket.join(game.code);
     game.players.set(socket.id, {
@@ -103,7 +161,15 @@ io.on("connection", (socket) => {
     const game = games.get(code);
     if (!game || socket.id !== game.hostId) return;
 
-    if (Array.isArray(categories) && categories.length) game.categories = categories;
+    // Choix des thèmes
+    if (game.randomThemes) {
+      const all = loadCategoriesFile();
+      game.categories = pickRandom(all, 6); // <-- 6 catégories
+    } else if (Array.isArray(categories) && categories.length) {
+      game.categories = categories;
+    } else if (!game.categories || !game.categories.length) {
+      game.categories = DEFAULT_CATEGORIES;
+    }
 
     game.status = "playing";
     game.round += 1;
@@ -113,19 +179,19 @@ io.on("connection", (socket) => {
       p.submitted = false;
       p.answers = {};
       p.validations = {};
-      p.draft = {};           // <— nouveau : brouillon
+      p.draft = {}; // <— nouveau : brouillon
     }
 
     io.to(code).emit("roundStarted", {
       round: game.round,
       letter: game.letter,
       categories: game.categories,
-      endMode: game.endMode,  // <— utile pour afficher le mode côté client
+      endMode: game.endMode, // <— utile pour afficher le mode côté client
     });
   });
 
   // draft d'un joueur (réponse temporaire)
-  socket.on('draft', ({ code, answers }) => {
+  socket.on("draft", ({ code, answers }) => {
     const game = games.get(code);
     if (!game) return;
     const p = game.players.get(socket.id);
@@ -144,7 +210,7 @@ io.on("connection", (socket) => {
     player.submitted = true;
     player.answers = answers || player.draft || {};
 
-    if (game.endMode === 'first') {
+    if (game.endMode === "first") {
       // ➜ Premier qui valide : on fige TOUT LE MONDE avec leur brouillon
       for (const p of game.players.values()) {
         if (!p.submitted) {
@@ -210,6 +276,7 @@ io.on("connection", (socket) => {
       playerId,
       category: key,
       valid: p.validations[key],
+      randomThemes: !!game.randomThemes,
     });
   });
 
@@ -242,7 +309,9 @@ io.on("connection", (socket) => {
           games.delete(game.code);
         } else {
           if (wasHost) {
-            const next = [...game.players.values()].sort((a,b)=>a.joinedAt-b.joinedAt)[0];
+            const next = [...game.players.values()].sort(
+              (a, b) => a.joinedAt - b.joinedAt
+            )[0];
             if (next) game.hostId = next.id;
           }
           io.to(game.code).emit("lobbyUpdate", publicGame(game));
@@ -253,13 +322,13 @@ io.on("connection", (socket) => {
   });
 
   // draft d'un joueur (réponse temporaire)
-socket.on('draft', ({ code, answers }) => {
-  const game = games.get(code);
-  if (!game) return;
-  const p = game.players.get(socket.id);
-  if (!p) return;
-  p.draft = { ...(answers || {}) }; // on mémorise une copie
-});
+  socket.on("draft", ({ code, answers }) => {
+    const game = games.get(code);
+    if (!game) return;
+    const p = game.players.get(socket.id);
+    if (!p) return;
+    p.draft = { ...(answers || {}) }; // on mémorise une copie
+  });
 });
 
 // --- Helpers pour payloads sûrs ---
@@ -270,10 +339,15 @@ function publicGame(game) {
     round: game.round,
     letter: game.letter,
     categories: game.categories,
-    hostPlays: game.hostPlays,   // <—
-    endMode: game.endMode,       // <—
-    players: [...game.players.values()].map(p => ({
-      id: p.id, name: p.name, score: p.score, submitted: p.submitted, isHost: p.id === game.hostId,
+    randomThemes: !!game.randomThemes,
+    hostPlays: game.hostPlays, // <—
+    endMode: game.endMode, // <—
+    players: [...game.players.values()].map((p) => ({
+      id: p.id,
+      name: p.name,
+      score: p.score,
+      submitted: p.submitted,
+      isHost: p.id === game.hostId,
     })),
   };
 }
@@ -284,8 +358,11 @@ function reviewPayload(game) {
     letter: game.letter,
     categories: game.categories,
     reviewIndex: game.reviewIndex ?? 0,
-    players: [...game.players.values()].map(p => ({
-      id: p.id, name: p.name, answers: p.answers, validations: p.validations,
+    players: [...game.players.values()].map((p) => ({
+      id: p.id,
+      name: p.name,
+      answers: p.answers,
+      validations: p.validations,
     })),
   };
 }
@@ -297,4 +374,6 @@ function leaderboard(game) {
 }
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log("Petit Bac server on http://localhost:" + PORT));
+server.listen(PORT, () =>
+  console.log("Petit Bac server on http://localhost:" + PORT)
+);
