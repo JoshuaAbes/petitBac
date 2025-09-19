@@ -312,7 +312,9 @@
         <template v-if="!iAmHost || game.hostPlays">
           <div class="grid" v-for="cat in playing.categories" :key="cat">
             <label class="k">{{ cat }}</label>
-            <input :placeholder="'Réponse en '+playing.letter+'…'" v-model="answers[cat]" />
+            <input :placeholder="'Réponse en '+playing.letter+'…'"
+                   v-model="answers[cat]"
+                   @input="sendDraft" />
           </div>
 
           <button class="primary" @click="submitAnswers" :disabled="submitted">
@@ -506,6 +508,9 @@
           },
           goLobby() {
             this.view = "lobby";
+          },
+          sendDraft() {
+            socket.emit('draft', { code: this.code, answers: this.answers });
           },
         },
         mounted() {

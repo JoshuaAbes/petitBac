@@ -34,8 +34,13 @@ app.get("/health", (_, res) => res.json({ ok: true }));
 
 // === Socket.IO ===
 io.on("connection", (socket) => {
+  // Utilitaire pour ne compter que les joueurs qui jouent (hors MC si non joueur)
+  function playingPlayers(game) {
+    return [...game.players.values()].filter((p) => !(p.id === game.hostId && !game.hostPlays));
+  }
+
   // Création de partie par le MC
-  socket.on("createGame", ({ name, categories, hostPlays, endMode }) => {
+  socket.on("createGame", ({ name, categories, hostPlays = true, endMode = 'all' }) => {
     const code = nanoid();
     const game = {
       code,
@@ -45,31 +50,26 @@ io.on("connection", (socket) => {
       round: 0,
       letter: null,
       categories: categories && categories.length ? categories : [
-        "Fruit",
-        "Objet très utile sur une île déserte",
-        "Hobby",
-        "Sport un peu niche",
-        "Arme",
-        "Site internet",
+        "Fruit","Objet très utile sur une île déserte","Hobby","Sport un peu niche","Arme","Site internet"
       ],
       reviewIndex: 0,
-      endMode: endMode === 'first' ? 'first' : 'all', // défaut: all
+      hostPlays: !!hostPlays,
+      endMode: endMode === 'first' ? 'first' : 'all',
     };
 
     socket.join(code);
-      // Seulement si le MC veut jouer, on l'ajoute comme joueur
-      if (hostPlays !== false) {
-    game.players.set(socket.id, {
-      id: socket.id,
-      name: name?.trim() || "Maître",
-      isHost: true,
-      joinedAt: Date.now(),
-      submitted: false,
-      answers: {},
-      validations: {},
-      score: 0,
-    });
-      }
+    if (hostPlays !== false) {
+      game.players.set(socket.id, {
+        id: socket.id,
+        name: name?.trim() || "Maître",
+        isHost: true,
+        joinedAt: Date.now(),
+        submitted: false,
+        answers: {},
+        validations: {},
+        score: 0,
+      });
+    }
 
     games.set(code, game);
     io.to(code).emit("lobbyUpdate", publicGame(game));
@@ -101,29 +101,36 @@ io.on("connection", (socket) => {
   // Lancer un round par le MC
   socket.on("startRound", ({ code, letter, categories }) => {
     const game = games.get(code);
+    if (!game || socket.id !== game.hostId) return;
+
+    if (Array.isArray(categories) && categories.length) game.categories = categories;
+
+    game.status = "playing";
+    game.round += 1;
+    game.letter = letter || randomLetter();
+
+    for (const p of game.players.values()) {
+      p.submitted = false;
+      p.answers = {};
+      p.validations = {};
+      p.draft = {};           // <— nouveau : brouillon
+    }
+
+    io.to(code).emit("roundStarted", {
+      round: game.round,
+      letter: game.letter,
+      categories: game.categories,
+      endMode: game.endMode,  // <— utile pour afficher le mode côté client
+    });
+  });
+
+  // draft d'un joueur (réponse temporaire)
+  socket.on('draft', ({ code, answers }) => {
+    const game = games.get(code);
     if (!game) return;
-    if (socket.id !== game.hostId) return;
-        
-        // Met à jour les catégories si envoyées
-        if (Array.isArray(categories) && categories.length) {
-          game.categories = categories;
-        }
-        
-        game.status = "playing";
-        game.round++;
-        game.letter = letter || randomLetter();
-        if (categories && categories.length) game.categories = categories;
-        // Réinitialise les réponses et soumissions
-        for (const p of game.players.values()) {
-          p.submitted = false;
-          p.answers = {};
-        }
-        io.to(code).emit("roundStarted", {
-          round: game.round,
-          letter: game.letter,
-          categories: game.categories,
-          endMode: game.endMode,
-        });
+    const p = game.players.get(socket.id);
+    if (!p) return;
+    p.draft = { ...(answers || {}) };
   });
 
   // Soumission des réponses par un joueur
@@ -133,29 +140,34 @@ io.on("connection", (socket) => {
     const player = game.players.get(socket.id);
     if (!player) return;
 
+    // Le joueur qui envoie : on fige ses réponses
     player.submitted = true;
-    player.answers = answers || {};
+    player.answers = answers || player.draft || {};
 
-    io.to(code).emit("progress", {
-      submitted: [...game.players.values()].filter((p) => p.submitted).length,
-      total: game.players.size,
-    });
-
-    // Fin de manche selon le mode choisi
     if (game.endMode === 'first') {
-      // Dès qu'un joueur soumet, on passe en review
-      game.status = "review";
-      game.reviewIndex = 0;
-      io.to(code).emit("reviewPhase", reviewPayload(game));
-      io.to(code).emit("reviewNavigate", { index: game.reviewIndex });
-    } else {
-      // Mode classique: tous doivent soumettre
-      if ([...game.players.values()].every((p) => p.submitted)) {
-        game.status = "review";
-        game.reviewIndex = 0;
-        io.to(code).emit("reviewPhase", reviewPayload(game));
-        io.to(code).emit("reviewNavigate", { index: game.reviewIndex });
+      // ➜ Premier qui valide : on fige TOUT LE MONDE avec leur brouillon
+      for (const p of game.players.values()) {
+        if (!p.submitted) {
+          p.submitted = true;
+          p.answers = p.draft || {};
+        }
       }
+      game.status = "review";
+      io.to(code).emit("reviewPhase", reviewPayload(game));
+      io.to(code).emit("reviewNavigate", { index: game.reviewIndex ?? 0 });
+      return;
+    }
+
+    // ➜ Mode "tous doivent valider"
+    const submitted = playingPlayers(game).filter((p) => p.submitted).length;
+    const total = playingPlayers(game).length;
+
+    io.to(code).emit("progress", { submitted, total });
+
+    if (submitted === total) {
+      game.status = "review";
+      io.to(code).emit("reviewPhase", reviewPayload(game));
+      io.to(code).emit("reviewNavigate", { index: game.reviewIndex ?? 0 });
     }
   });
 
@@ -163,10 +175,16 @@ io.on("connection", (socket) => {
   socket.on("forceReview", ({ code }) => {
     const game = games.get(code);
     if (!game || socket.id !== game.hostId) return;
+
+    for (const p of game.players.values()) {
+      if (!p.submitted) {
+        p.submitted = true;
+        p.answers = p.draft || {};
+      }
+    }
     game.status = "review";
-    game.reviewIndex = 0; // FIX: idem si on force la review
     io.to(code).emit("reviewPhase", reviewPayload(game));
-    io.to(code).emit("reviewNavigate", { index: game.reviewIndex });
+    io.to(code).emit("reviewNavigate", { index: game.reviewIndex ?? 0 });
   });
 
   // Le MC change de thème pendant la review → on synchronise tout le monde
@@ -233,6 +251,15 @@ io.on("connection", (socket) => {
       }
     }
   });
+
+  // draft d'un joueur (réponse temporaire)
+socket.on('draft', ({ code, answers }) => {
+  const game = games.get(code);
+  if (!game) return;
+  const p = game.players.get(socket.id);
+  if (!p) return;
+  p.draft = { ...(answers || {}) }; // on mémorise une copie
+});
 });
 
 // --- Helpers pour payloads sûrs ---
@@ -243,30 +270,26 @@ function publicGame(game) {
     round: game.round,
     letter: game.letter,
     categories: game.categories,
-    hostPlays: game.players.has(game.hostId),
-    players: [...game.players.values()].map((p) => ({
-      id: p.id,
-      name: p.name,
-      score: p.score,
-      submitted: p.submitted,
-      isHost: p.id === game.hostId,
+    hostPlays: game.hostPlays,   // <—
+    endMode: game.endMode,       // <—
+    players: [...game.players.values()].map(p => ({
+      id: p.id, name: p.name, score: p.score, submitted: p.submitted, isHost: p.id === game.hostId,
     })),
   };
 }
+
 function reviewPayload(game) {
   return {
     code: game.code,
     letter: game.letter,
     categories: game.categories,
-    reviewIndex: game.reviewIndex,      // ← ajoute l'index courant ici
-    players: [...game.players.values()].map((p) => ({
-      id: p.id,
-      name: p.name,
-      answers: p.answers,
-      validations: p.validations,
+    reviewIndex: game.reviewIndex ?? 0,
+    players: [...game.players.values()].map(p => ({
+      id: p.id, name: p.name, answers: p.answers, validations: p.validations,
     })),
   };
 }
+
 function leaderboard(game) {
   return [...game.players.values()]
     .map((p) => ({ id: p.id, name: p.name, score: p.score }))
