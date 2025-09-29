@@ -108,25 +108,48 @@ io.on("connection", (socket) => {
     socket.emit("created", { code, youAreHost: true });
   });
 
-  // Rejoindre
+  // Rejoindre une partie (même si la partie est en cours)
   socket.on("joinGame", ({ code, name }) => {
     const game = games.get((code || "").toUpperCase());
     if (!game) return socket.emit("errorMsg", "Code de partie invalide.");
-    if (game.status !== "lobby") return socket.emit("errorMsg", "La partie a déjà démarré.");
+
+    // Si le joueur existe déjà (reconnexion), on met à jour son nom si besoin
+    let player = game.players.get(socket.id);
+    if (!player) {
+      // Si la partie est en lobby ou si on autorise la reconnexion en cours de partie
+      player = {
+        id: socket.id,
+        name: (name || "Joueur").slice(0, 20),
+        score: 0,
+        submitted: false,
+        answers: {},
+        validations: {},
+        joinedAt: Date.now(),
+      };
+      game.players.set(socket.id, player);
+    } else if (name && player.name !== name) {
+      player.name = name.slice(0, 20);
+    }
 
     socket.join(game.code);
-    game.players.set(socket.id, {
-      id: socket.id,
-      name: (name || "Joueur").slice(0, 20),
-      score: 0,
-      submitted: false,
-      answers: {},
-      validations: {},
-      joinedAt: Date.now(),
-    });
+
+    // Envoie l'état actuel selon le status
+    if (game.status === "playing") {
+      socket.emit("roundStarted", {
+        round: game.round,
+        letter: game.letter,
+        categories: game.categories,
+        endMode: game.endMode,
+      });
+    } else if (game.status === "review") {
+      socket.emit("reviewPhase", reviewPayload(game));
+      socket.emit("reviewNavigate", { index: game.reviewIndex ?? 0 });
+    } else if (game.status === "lobby") {
+      socket.emit("lobbyUpdate", publicGame(game));
+    }
 
     io.to(game.code).emit("lobbyUpdate", publicGame(game));
-    socket.emit("joined", { code: game.code, youAreHost: false });
+    socket.emit("joined", { code: game.code, youAreHost: socket.id === game.hostId });
   });
 
   // Lancer le round
