@@ -66,12 +66,6 @@ const randomLetter = () => {
 
 // --- Mémoire (simple, en RAM) ---
 const games = new Map();
-/*
-Game = {
-  code, hostId, players, status, round, letter, categories,
-  reviewIndex
-}
-*/
 
 // === Routes REST optionnelles ===
 app.get("/health", (_, res) => res.json({ ok: true }));
@@ -164,11 +158,25 @@ io.on("connection", (socket) => {
     // Choix des thèmes
     if (game.randomThemes) {
       const all = loadCategoriesFile();
-      game.categories = pickRandom(all, 6); // <-- 6 catégories
+      let tries = 0;
+      let picked;
+      do {
+        picked = pickRandom(all, 6);
+        tries++;
+        // On compare avec les catégories du round précédent
+      } while (
+        game.lastCategories &&
+        arraysEqual(picked, game.lastCategories) &&
+        tries < 10
+      );
+      game.categories = picked;
+      game.lastCategories = picked;
     } else if (Array.isArray(categories) && categories.length) {
       game.categories = categories;
+      game.lastCategories = categories;
     } else if (!game.categories || !game.categories.length) {
       game.categories = DEFAULT_CATEGORIES;
+      game.lastCategories = DEFAULT_CATEGORIES;
     }
 
     game.status = "playing";
@@ -371,6 +379,16 @@ function leaderboard(game) {
   return [...game.players.values()]
     .map((p) => ({ id: p.id, name: p.name, score: p.score }))
     .sort((a, b) => b.score - a.score);
+}
+
+// Helper pour comparer deux tableaux (ordre important ici)
+function arraysEqual(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }
 
 const PORT = process.env.PORT || 3000;
