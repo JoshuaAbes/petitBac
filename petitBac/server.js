@@ -266,6 +266,7 @@ function publicGame(game) {
     letter: game.letter,
     categories: game.categories,
     randomThemes: !!game.randomThemes,
+    hostPlays: !!game.hostPlays,
     players: [...game.players.values()].map((p) => ({
       id: p.id,
       name: p.name,

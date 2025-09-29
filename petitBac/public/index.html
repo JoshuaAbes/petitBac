@@ -6,7 +6,10 @@
     <title>Petit Bac</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="./style.css" />
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script src="https://unpkg.com/vue@3.4.31/dist/vue.global.prod.js"></script>
@@ -15,8 +18,10 @@
     <div id="app" class="wrap">
       <h1 style="font-weight: 800; letter-spacing: 0.02em">Le petit Bac</h1>
 
+      <!-- HOME -->
       <div class="card grid" v-if="view==='home'">
         <div class="grid cols-2">
+          <!-- Créer une partie -->
           <div>
             <h3>Créer une partie</h3>
             <div class="grid">
@@ -27,17 +32,20 @@
                 placeholder="Catégories (une par ligne)"
                 :disabled="useRandomCats"
               ></textarea>
-              <label class="row" style="justify-content:flex-start; gap:8px">
+              <label class="row" style="justify-content: flex-start; gap: 8px">
                 <input type="checkbox" v-model="useRandomCats" class="cb" />
-                <span>Utiliser 6 catégories aléatoires (depuis le fichier JSON)</span>
+                <span
+                  >Utiliser 6 catégories aléatoires (depuis le fichier
+                  JSON)</span
+                >
               </label>
-              <label class="row" style="justify-content:flex-start; gap:8px">
+              <label class="row" style="justify-content: flex-start; gap: 8px">
                 <input type="checkbox" v-model="hostPlays" class="cb" />
                 <span>Je participe en tant que joueur</span>
               </label>
-              <label class="row" style="justify-content:flex-start; gap:8px">
+              <label class="row" style="justify-content: flex-start; gap: 8px">
                 <span>Fin de manche :</span>
-                <select v-model="endMode" style="width:auto; min-width:180px;">
+                <select v-model="endMode" style="width: auto; min-width: 180px">
                   <option value="all">Tous doivent valider</option>
                   <option value="first">Premier qui valide stoppe</option>
                 </select>
@@ -45,6 +53,7 @@
               <button class="primary" @click="createGame">Créer</button>
             </div>
           </div>
+          <!-- Rejoindre une partie -->
           <div>
             <h3>Rejoindre</h3>
             <div class="grid">
@@ -83,18 +92,16 @@
             </div>
           </div>
         </div>
-
         <div v-if="iAmHost" class="grid cols-2">
           <div class="grid">
-            <label class="k">Lettre (laisser vide pour aléatoire)</label
-            ><input v-model="customLetter" placeholder="Ex: P" maxlength="1" />
+            <label class="k">Lettre (laisser vide pour aléatoire)</label>
+            <input v-model="customLetter" placeholder="Ex: P" maxlength="1" />
           </div>
           <div class="grid">
-            <label class="k">Catégories</label
-            ><textarea v-model="categoriesText" rows="4"></textarea>
+            <label class="k">Catégories</label>
+            <textarea v-model="categoriesText" rows="4"></textarea>
           </div>
         </div>
-
         <div class="row">
           <button v-if="iAmHost" class="primary" @click="startRound">
             Lancer le round
@@ -116,8 +123,14 @@
           </h2>
           <div class="badge">Round {{ round }}</div>
         </div>
-        <div class="end-mode-info" style="margin-bottom:8px;">
-          <span>Mode de fin de manche : <strong>{{ (playing.endMode || game.endMode || endMode) === 'first' ? 'Premier qui valide stoppe' : 'Tous doivent valider' }}</strong></span>
+        <div class="end-mode-info" style="margin-bottom: 8px">
+          <span>
+            Mode de fin de manche :
+            <strong>
+              {{ (playing.endMode || game.endMode || endMode) === 'first' ?
+              'Premier qui valide stoppe' : 'Tous doivent valider' }}
+            </strong>
+          </span>
         </div>
         <div v-if="iAmHost && !game.hostPlays" class="badge">
           Mode MC — vous ne participez pas à ce round
@@ -126,11 +139,12 @@
         <template v-if="!iAmHost || game.hostPlays">
           <div class="grid" v-for="cat in playing.categories" :key="cat">
             <label class="k">{{ cat }}</label>
-            <input :placeholder="'Réponse en '+playing.letter+'…'"
-                   v-model="answers[cat]"
-                   @input="sendDraft" />
+            <input
+              :placeholder="'Réponse en '+playing.letter+'…'"
+              v-model="answers[cat]"
+              @input="sendDraft"
+            />
           </div>
-
           <button class="primary" @click="submitAnswers" :disabled="submitted">
             {{ submitted ? 'Envoyé ✓' : 'Envoyer' }}
           </button>
@@ -143,7 +157,9 @@
           <div class="list">
             <div class="answerRow" v-for="cat in playing.categories" :key="cat">
               <div class="playerName">{{ cat }}</div>
-              <div class="answerText muted">Le MC ne participe pas à ce round</div>
+              <div class="answerText muted">
+                Le MC ne participe pas à ce round
+              </div>
             </div>
           </div>
         </template>
@@ -156,11 +172,10 @@
           style="justify-content: space-between; align-items: baseline"
         >
           <h2>Thème : {{ review.categories[reviewIndex] }}</h2>
-          <span class="badge"
-            >{{ reviewIndex+1 }} / {{ review.categories.length }}</span
-          >
+          <span class="badge">
+            {{ reviewIndex+1 }} / {{ review.categories.length }}
+          </span>
         </div>
-
         <div class="list">
           <div class="answerRow" v-for="p in review.players" :key="p.id">
             <div class="playerName">{{ p.name }}</div>
@@ -188,7 +203,6 @@
             </div>
           </div>
         </div>
-
         <div class="row" style="justify-content: space-between">
           <button v-if="iAmHost" class="primary" @click="endRound">
             Clore le round & calculer
@@ -225,6 +239,7 @@
       </p>
     </div>
 
+    <!-- Vue.js + Socket.IO logic -->
     <script>
       const { createApp, reactive } = Vue;
       const socket = io();
@@ -251,7 +266,7 @@
             reviewIndex: 0,
             leaderboard: [],
             hostPlays: true,
-            endMode: 'all', // 'all' = tous doivent valider, 'first' = premier stoppe
+            endMode: "all",
             useRandomCats: false,
           };
         },
@@ -266,7 +281,7 @@
               categories,
               hostPlays: this.hostPlays,
               endMode: this.endMode,
-              randomThemes: this.useRandomCats
+              randomThemes: this.useRandomCats,
             });
           },
           joinGame() {
@@ -283,8 +298,11 @@
               .split(/\n|,/)
               .map((s) => s.trim())
               .filter(Boolean);
-            // Le serveur décidera quoi faire selon randomThemes stocké côté partie
-            socket.emit("startRound", { code: this.code, letter, categories: cats });
+            socket.emit("startRound", {
+              code: this.code,
+              letter,
+              categories: cats,
+            });
           },
           submitAnswers() {
             this.submitted = true;
@@ -326,7 +344,7 @@
             this.view = "lobby";
           },
           sendDraft() {
-            socket.emit('draft', { code: this.code, answers: this.answers });
+            socket.emit("draft", { code: this.code, answers: this.answers });
           },
         },
         mounted() {
@@ -345,7 +363,8 @@
             this.code = g.code;
             this.round = g.round;
             this.categoriesText = g.categories.join("\n");
-            this.useRandomCats = !!g.randomThemes; // refléter l’état côté MC
+            this.useRandomCats = !!g.randomThemes;
+            this.hostPlays = g.hostPlays;
           });
           socket.on("roundStarted", (payload) => {
             this.view = "playing";
@@ -359,21 +378,16 @@
           socket.on("progress", (p) => {
             this.progress = p;
           });
-
-          // ⚠️ ne PAS réinitialiser reviewIndex ici, le MC pilote via reviewNavigate
           socket.on("reviewPhase", (payload) => {
             this.view = "review";
             this.review = payload;
-            // => utilise l'index envoyé par le serveur
             if (typeof payload.reviewIndex === "number") {
               this.reviewIndex = payload.reviewIndex;
             }
           });
-          // ➜ synchro du thème piloté par le MC
           socket.on("reviewNavigate", ({ index }) => {
             this.reviewIndex = index;
           });
-
           socket.on("validationUpdated", ({ playerId, category, valid }) => {
             const p = this.review.players.find((x) => x.id === playerId);
             if (p) p.validations[category] = valid;
