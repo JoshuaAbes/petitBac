@@ -1,16 +1,22 @@
+// --- Core & setup ------------------------------------------------------------
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
 const { customAlphabet } = require("nanoid");
+const fs = require("fs");
+const path = require("path");
 
+// Serveur web
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static("public"));
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
 
-const fs = require("fs");
-const path = require("path");
+// --- Constantes & utilitaires -----------------------------------------------
+const nanoid = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 5);
 
 const DEFAULT_CATEGORIES = [
   "Fruit",
@@ -21,6 +27,7 @@ const DEFAULT_CATEGORIES = [
   "Site internet",
 ];
 
+// Lecture robuste du fichier de thèmes (ne jette jamais)
 function loadCategoriesFile() {
   const candidates = [
     path.join(__dirname, "categories.json"),
@@ -34,14 +41,10 @@ function loadCategoriesFile() {
         if (Array.isArray(data)) return data;
         if (data && Array.isArray(data.categories)) return data.categories;
       }
-    } catch (e) {
-      console.warn("[categories] lecture échouée:", e.message);
-    }
+    } catch (_) {}
   }
-  console.warn("[categories] fallback valeurs par défaut");
   return DEFAULT_CATEGORIES;
 }
-
 function pickRandom(arr, n) {
   const copy = [...arr];
   for (let i = copy.length - 1; i > 0; i--) {
@@ -50,260 +53,185 @@ function pickRandom(arr, n) {
   }
   return copy.slice(0, n);
 }
-
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
-
-// --- Utilitaires ---
-const nanoid = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 5); // ex: P7K3Q
-const randomLetter = () => {
+function randomLetter() {
   const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const pool = letters
-    .split("")
-    .filter((l) => !["W", "X", "Y", "Z"].includes(l));
+  const pool = letters.split("").filter((l) => !["W", "X", "Y", "Z"].includes(l));
   return pool[Math.floor(Math.random() * pool.length)];
-};
+}
 
-// --- Mémoire (simple, en RAM) ---
+// --- État mémoire ------------------------------------------------------------
+/*
+game = {
+  code, hostId, status: 'lobby'|'playing'|'review',
+  round, letter, categories, reviewIndex,
+  hostPlays, endMode: 'first'|'all', randomThemes,
+  players: Map<socketId, { id, name, score, submitted, answers, validations, joinedAt }>
+}
+*/
 const games = new Map();
 
-// === Routes REST optionnelles ===
+// --- Routes HTTP min ---------------------------------------------------------
 app.get("/health", (_, res) => res.json({ ok: true }));
 
-// === Socket.IO ===
+// --- Socket.IO ---------------------------------------------------------------
 io.on("connection", (socket) => {
-  // Utilitaire pour ne compter que les joueurs qui jouent (hors MC si non joueur)
-  function playingPlayers(game) {
-    return [...game.players.values()].filter(
-      (p) => !(p.id === game.hostId && !game.hostPlays)
-    );
-  }
+  // Créer une partie
+  socket.on("createGame", ({ name, categories, hostPlays = true, endMode = "all", randomThemes = false }) => {
+    const code = nanoid();
+    const game = {
+      code,
+      hostId: socket.id,
+      status: "lobby",
+      round: 0,
+      letter: null,
+      categories: Array.isArray(categories) && categories.length ? categories : DEFAULT_CATEGORIES,
+      reviewIndex: 0,
+      hostPlays: !!hostPlays,
+      endMode: endMode === "first" ? "first" : "all",
+      randomThemes: !!randomThemes,
+      players: new Map(),
+    };
 
-  // Création de partie par le MC
-  socket.on(
-    "createGame",
-    ({
-      name,
-      categories,
-      hostPlays = true,
-      endMode = "all",
-      randomThemes = false,
-    }) => {
-      const code = nanoid();
-      const game = {
-        code,
-        hostId: socket.id,
-        players: new Map(),
-        status: "lobby",
-        round: 0,
-        letter: null,
-        categories:
-          Array.isArray(categories) && categories.length
-            ? categories
-            : DEFAULT_CATEGORIES,
-        reviewIndex: 0,
-        hostPlays: !!hostPlays,
-        endMode: endMode === "first" ? "first" : "all",
-        randomThemes: !!randomThemes,
-      };
+    socket.join(code);
+    game.players.set(socket.id, {
+      id: socket.id,
+      name: (name || "Maître").slice(0, 20),
+      score: 0,
+      submitted: false,
+      answers: {},
+      validations: {},
+      joinedAt: Date.now(),
+    });
 
-      socket.join(code);
-      if (hostPlays !== false) {
-        game.players.set(socket.id, {
-          id: socket.id,
-          name: name?.trim() || "Maître",
-          isHost: true,
-          joinedAt: Date.now(),
-          submitted: false,
-          answers: {},
-          validations: {},
-          score: 0,
-        });
-      }
+    games.set(code, game);
+    io.to(code).emit("lobbyUpdate", publicGame(game));
+    socket.emit("created", { code, youAreHost: true });
+  });
 
-      games.set(code, game);
-      io.to(code).emit("lobbyUpdate", publicGame(game));
-      socket.emit("created", { code, youAreHost: true });
-    }
-  );
-
-  // Rejoindre une partie
+  // Rejoindre
   socket.on("joinGame", ({ code, name }) => {
     const game = games.get((code || "").toUpperCase());
     if (!game) return socket.emit("errorMsg", "Code de partie invalide.");
-    if (game.status !== "lobby")
-      return socket.emit("errorMsg", "La partie a déjà démarré.");
+    if (game.status !== "lobby") return socket.emit("errorMsg", "La partie a déjà démarré.");
 
     socket.join(game.code);
     game.players.set(socket.id, {
       id: socket.id,
-      name: (name || "Invité").slice(0, 20),
-      isHost: false,
-      joinedAt: Date.now(),
+      name: (name || "Joueur").slice(0, 20),
+      score: 0,
       submitted: false,
       answers: {},
       validations: {},
-      score: 0,
+      joinedAt: Date.now(),
     });
 
     io.to(game.code).emit("lobbyUpdate", publicGame(game));
     socket.emit("joined", { code: game.code, youAreHost: false });
   });
 
-  // Lancer un round par le MC
+  // Lancer le round
   socket.on("startRound", ({ code, letter, categories }) => {
     const game = games.get(code);
     if (!game || socket.id !== game.hostId) return;
 
-    // Choix des thèmes
-    if (game.randomThemes) {
-      const all = loadCategoriesFile();
-      let tries = 0;
-      let picked;
-      do {
-        picked = pickRandom(all, 6);
-        tries++;
-        // On compare avec les catégories du round précédent
-      } while (
-        game.lastCategories &&
-        arraysEqual(picked, game.lastCategories) &&
-        tries < 10
-      );
-      game.categories = picked;
-      game.lastCategories = picked;
-    } else if (Array.isArray(categories) && categories.length) {
-      game.categories = categories;
-      game.lastCategories = categories;
-    } else if (!game.categories || !game.categories.length) {
-      game.categories = DEFAULT_CATEGORIES;
-      game.lastCategories = DEFAULT_CATEGORIES;
-    }
-
     game.status = "playing";
     game.round += 1;
-    game.letter = letter || randomLetter();
+    game.letter = (letter || randomLetter()).toUpperCase();
 
+    // Catégories : aléatoires depuis JSON ou celles saisies
+    if (game.randomThemes) {
+      const all = loadCategoriesFile();
+      game.categories = pickRandom(all, 6);
+    } else if (Array.isArray(categories) && categories.length) {
+      game.categories = categories;
+    } else if (!game.categories?.length) {
+      game.categories = DEFAULT_CATEGORIES;
+    }
+
+    // Reset joueurs
     for (const p of game.players.values()) {
       p.submitted = false;
       p.answers = {};
       p.validations = {};
-      p.draft = {}; // <— nouveau : brouillon
     }
 
     io.to(code).emit("roundStarted", {
       round: game.round,
       letter: game.letter,
       categories: game.categories,
-      endMode: game.endMode, // <— utile pour afficher le mode côté client
+      endMode: game.endMode,
     });
   });
 
-  // draft d'un joueur (réponse temporaire)
-  socket.on("draft", ({ code, answers }) => {
-    const game = games.get(code);
-    if (!game) return;
-    const p = game.players.get(socket.id);
-    if (!p) return;
-    p.draft = { ...(answers || {}) };
-  });
-
-  // Soumission des réponses par un joueur
+  // Soumettre ses réponses
   socket.on("submitAnswers", ({ code, answers }) => {
     const game = games.get(code);
-    if (!game || game.status !== "playing") return;
-    const player = game.players.get(socket.id);
-    if (!player) return;
+    const player = game?.players.get(socket.id);
+    if (!game || game.status !== "playing" || !player) return;
 
-    // Le joueur qui envoie : on fige ses réponses
     player.submitted = true;
-    player.answers = answers || player.draft || {};
+    player.answers = answers || {};
 
-    if (game.endMode === "first") {
-      // ➜ Premier qui valide : on fige TOUT LE MONDE avec leur brouillon
-      for (const p of game.players.values()) {
-        if (!p.submitted) {
-          p.submitted = true;
-          p.answers = p.draft || {};
-        }
-      }
+    // Progression
+    io.to(code).emit("progress", {
+      submitted: [...game.players.values()].filter((p) => p.submitted).length,
+      total: game.players.size,
+    });
+
+    // Passage en review selon le mode
+    const allSubmitted = [...game.players.values()].every((p) => p.submitted);
+    if (game.endMode === "first" || allSubmitted) {
       game.status = "review";
+      game.reviewIndex = 0;
       io.to(code).emit("reviewPhase", reviewPayload(game));
-      io.to(code).emit("reviewNavigate", { index: game.reviewIndex ?? 0 });
-      return;
-    }
-
-    // ➜ Mode "tous doivent valider"
-    const submitted = playingPlayers(game).filter((p) => p.submitted).length;
-    const total = playingPlayers(game).length;
-
-    io.to(code).emit("progress", { submitted, total });
-
-    if (submitted === total) {
-      game.status = "review";
-      io.to(code).emit("reviewPhase", reviewPayload(game));
-      io.to(code).emit("reviewNavigate", { index: game.reviewIndex ?? 0 });
+      io.to(code).emit("reviewNavigate", { index: game.reviewIndex });
     }
   });
 
-  // Passage manuel en phase de review par le MC
+  // Forcer review (MC)
   socket.on("forceReview", ({ code }) => {
     const game = games.get(code);
     if (!game || socket.id !== game.hostId) return;
-
-    for (const p of game.players.values()) {
-      if (!p.submitted) {
-        p.submitted = true;
-        p.answers = p.draft || {};
-      }
-    }
     game.status = "review";
+    game.reviewIndex = 0;
     io.to(code).emit("reviewPhase", reviewPayload(game));
-    io.to(code).emit("reviewNavigate", { index: game.reviewIndex ?? 0 });
+    io.to(code).emit("reviewNavigate", { index: game.reviewIndex });
   });
 
-  // Le MC change de thème pendant la review → on synchronise tout le monde
+  // Navigation de thèmes en review (MC)
   socket.on("setReviewIndex", ({ code, index }) => {
     const game = games.get(code);
-    if (!game || socket.id !== game.hostId) return; // sécurité: seul le MC
+    if (!game || socket.id !== game.hostId) return;
     const max = (game.categories?.length || 1) - 1;
-    const i = Math.max(0, Math.min(index | 0, max));
-    game.reviewIndex = i;
-    io.to(code).emit("reviewNavigate", { index: i });
+    game.reviewIndex = Math.max(0, Math.min((index | 0), max));
+    io.to(code).emit("reviewNavigate", { index: game.reviewIndex });
   });
 
-  // Validation/Invalidation d'une réponse par le MC
+  // Valider / invalider (MC)
   socket.on("toggleValidation", ({ code, playerId, category }) => {
     const game = games.get(code);
     if (!game || socket.id !== game.hostId) return;
     const p = game.players.get(playerId);
     if (!p) return;
-
-    const key = category;
-    p.validations[key] = !p.validations[key];
+    p.validations[category] = !p.validations[category];
     io.to(code).emit("validationUpdated", {
       playerId,
-      category: key,
-      valid: p.validations[key],
-      randomThemes: !!game.randomThemes,
+      category,
+      valid: p.validations[category],
     });
   });
 
-  // Fin de round & calcul des scores
+  // Fin de round (MC)
   socket.on("endRound", ({ code }) => {
     const game = games.get(code);
     if (!game || socket.id !== game.hostId) return;
 
-    // Score = somme des validations (1 point par ✓)
     for (const p of game.players.values()) {
-      const gained = Object.values(p.validations).filter(Boolean).length;
-      p.score += gained;
+      p.score += Object.values(p.validations).filter(Boolean).length;
     }
     game.status = "lobby";
 
-    io.to(code).emit("roundEnded", {
-      leaderboard: leaderboard(game),
-      nextReady: true,
-    });
+    io.to(code).emit("roundEnded", { leaderboard: leaderboard(game) });
     io.to(code).emit("lobbyUpdate", publicGame(game));
   });
 
@@ -313,13 +241,12 @@ io.on("connection", (socket) => {
       if (game.players.has(socket.id)) {
         const wasHost = socket.id === game.hostId;
         game.players.delete(socket.id);
+
         if (game.players.size === 0) {
           games.delete(game.code);
         } else {
           if (wasHost) {
-            const next = [...game.players.values()].sort(
-              (a, b) => a.joinedAt - b.joinedAt
-            )[0];
+            const next = [...game.players.values()].sort((a, b) => a.joinedAt - b.joinedAt)[0];
             if (next) game.hostId = next.id;
           }
           io.to(game.code).emit("lobbyUpdate", publicGame(game));
@@ -328,18 +255,9 @@ io.on("connection", (socket) => {
       }
     }
   });
-
-  // draft d'un joueur (réponse temporaire)
-  socket.on("draft", ({ code, answers }) => {
-    const game = games.get(code);
-    if (!game) return;
-    const p = game.players.get(socket.id);
-    if (!p) return;
-    p.draft = { ...(answers || {}) }; // on mémorise une copie
-  });
 });
 
-// --- Helpers pour payloads sûrs ---
+// --- Helpers de payload ------------------------------------------------------
 function publicGame(game) {
   return {
     code: game.code,
@@ -348,8 +266,6 @@ function publicGame(game) {
     letter: game.letter,
     categories: game.categories,
     randomThemes: !!game.randomThemes,
-    hostPlays: game.hostPlays, // <—
-    endMode: game.endMode, // <—
     players: [...game.players.values()].map((p) => ({
       id: p.id,
       name: p.name,
@@ -359,13 +275,11 @@ function publicGame(game) {
     })),
   };
 }
-
 function reviewPayload(game) {
   return {
     code: game.code,
     letter: game.letter,
     categories: game.categories,
-    reviewIndex: game.reviewIndex ?? 0,
     players: [...game.players.values()].map((p) => ({
       id: p.id,
       name: p.name,
@@ -374,24 +288,12 @@ function reviewPayload(game) {
     })),
   };
 }
-
 function leaderboard(game) {
   return [...game.players.values()]
     .map((p) => ({ id: p.id, name: p.name, score: p.score }))
     .sort((a, b) => b.score - a.score);
 }
 
-// Helper pour comparer deux tableaux (ordre important ici)
-function arraysEqual(a, b) {
-  if (!Array.isArray(a) || !Array.isArray(b)) return false;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
-}
-
+// --- Start -------------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () =>
-  console.log("Petit Bac server on http://localhost:" + PORT)
-);
+server.listen(PORT, () => console.log(`Petit Bac server on http://localhost:${PORT}`));
